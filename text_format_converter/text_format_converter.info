@@ -1,0 +1,4 @@
+name = Text Format Converter
+description = Uses Pandoc to convert body text from one format to another.
+core = 7.x
+package = Input filters

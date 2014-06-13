@@ -1,0 +1,219 @@
+<?php
+
+/**
+ * @file
+ * Implementation of the Pandoc text converter library with Drupal.
+ */
+
+/**
+ * Implements hook_menu().
+ */
+function text_format_converter_menu() {
+  $items = array();
+  $items['admin/config/content/convert'] = array(
+    'title' => t('Pandoc text conversion'),
+    'type' => MENU_NORMAL_ITEM,
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('text_format_converter_form'),
+    'access arguments' => array('convert node text formats'),
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_permission().
+ */
+function text_format_converter_permission() {
+  return array(
+    'convert node text formats' => array(
+      'title' => t('Convert node text formats'),
+      'description' => t('Convert node body text with Pandoc.'),
+    ),
+  );
+}
+
+/**
+ * Processes nodes for text re-formatting.
+ *
+ * @param $nids
+ *  An array of nid values.
+ * @param $from
+ *  The current format of the text.
+ * @param $to
+ *  The format to convert the text to.
+ */
+function text_format_converter_process_nodes($nids, $from, $to) {
+  $processed = 0;
+  // Loop through all of the nodes.
+  foreach ($nids as $nid) {
+    // Load the node.
+    $node = node_load($nid);
+    // Get the text value.
+    $text = $node->body[LANGUAGE_NONE][0]['value'];
+    // Convert the text.
+    $text = text_format_converter_convert_text($text, $from, $to);
+    // Verify that the conversion was successful.
+    if ($text) {
+      // Assign the text back to the node.
+      $node->body[LANGUAGE_NONE][0]['value'] = $text;
+      // Save the updated node.
+      node_save($node);
+      // Increment the processed count.
+      $processed++;
+    }
+  }
+  $replacements = array(
+    '!processed' => $processed,
+  );
+  $message = t('Text format successfully converted for !processed nodes.', $replacements);
+  drupal_set_message($message);
+}
+
+/**
+ * Convert text from one format to another.
+ *
+ * @param $text
+ *  The string of text to convert.
+ * @param $from
+ *  The current format of the text.
+ * @param $to
+ *  The format to convert the text to.
+ *
+ * @return
+ *  The re-formatted text.
+ */
+function text_format_converter_convert_text($text, $from, $to) {
+  // Create the command.
+  $command = sprintf('pandoc -f %s -t %s --normalize', $from, $to);
+  // Build the settings.
+  $descriptorspec = array(
+    // Create the stdin as a pipe.
+    0 => array("pipe", "r"),
+    // Create the stdout as a pipe.
+    1 => array("pipe", "w"),
+  );
+  // Set some command settings.
+  $cwd = getcwd();
+  $env = array();
+  // Create the process.
+  $process = proc_open($command, $descriptorspec, $pipes, $cwd, $env);
+  // Verify that the process was created successfully.
+  if (is_resource($process)) {
+    // Write the text to stdin.
+    fwrite($pipes[0], $text);
+    fclose($pipes[0]);
+    // Get stdout stream content.
+    $text_converted = stream_get_contents($pipes[1]);
+    fclose($pipes[1]);
+    // Close the process.
+    $return_value = proc_close($process);
+    // A valid response was returned.
+    if ($text_converted) {
+      return $text_converted;
+    }
+    // Invalid response returned.
+    return FALSE;
+  }
+}
+
+/**
+ * Generates the text converter form.
+ */
+function text_format_converter_form() {
+  // Formats Pandoc can convert text from.
+  $formats_from = array(
+    'markdown' => 'Markdown',
+    'markdown_strict' => 'Markdown/strict',
+    'markdown_phpextra' => 'PHP Markdown Extra',
+    'markdown_github' => 'Github Markdown',
+    'markdown_mmd' => 'MultiMarkdown',
+    'rst' => 'reStructuredText',
+    'textile' => 'Textile',
+    'latex' => 'LaTeX',
+    'html' => 'HTML',
+    'docbook' => 'DocBook',
+    'opml' => 'OPML',
+    'org' => 'Emacs Org Mode',
+    'mediawiki' => 'MediaWiki',
+    'haddock' => 'Haddock markup',
+  );
+  // Formats Pandoc can convert text to.
+  $formats_to = array(
+    'html' => 'HTML',
+    'html5' => 'HTML 5',
+    'markdown' => 'Markdown',
+    'markdown_strict' => 'Markdown/strict',
+    'markdown_phpextra' => 'PHP Markdown Extra',
+    'markdown_github' => 'Github Markdown',
+    'markdown_mmd' => 'MultiMarkdown',
+    'rst' => 'reStructuredText',
+    'asciidoc' => 'AsciiDoc',
+    'textile' => 'Textile',
+    'org' => 'Emacs Org Mode',
+    'latex' => 'LaTeX',
+    'beamer' => 'LaTeX Beamer',
+    'context' => 'ConTeXt',
+    'man' => 'Groff man',
+    'texinfo' => 'Texinfo',
+    'docbook' => 'DocBook',
+    'opml' => 'OPML',
+    'opendocument' => 'OpenDocument',
+    'rtf' => 'RTF',
+    'mediawiki' => 'MediaWiki',
+  );
+  // Build a list of node types on the site.
+  $node_types = node_type_get_types();
+  foreach ($node_types as $key => $node_type) {
+    $types[$key] = $node_type->name;
+  }
+  // From format selector.
+  $form['format_from'] = array(
+    '#type' => 'select',
+    '#options' => $formats_from,
+    '#required' => TRUE,
+    '#title' => t('From format'),
+  );
+  // To format selector.
+  $form['format_to'] = array(
+    '#type' => 'select',
+    '#options' => $formats_to,
+    '#required' => TRUE,
+    '#title' => t('To format'),
+  );
+  // Node types selector.
+  $form['node_types'] = array(
+    '#type' => 'select',
+    '#options' => $types,
+    '#required' => TRUE,
+    '#title' => t('Node type to convert'),
+  );
+  // Submit button.
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Convert'),
+    '#submit' => array('text_format_converter_form_submit'),
+  );
+  return $form;
+}
+
+/**
+ * Submission callback function for text converter form.
+ */
+function text_format_converter_form_submit(&$form, &$form_state) {
+  $nids = array();
+  // Get the node type to act upon.
+  $type = $form_state['values']['node_types'];
+  // Get a list of nid values for nodes of the given types.
+  $query = new EntityFieldQuery();
+  $results = $query->entityCondition('entity_type', 'node')
+    ->entityCondition('bundle', $type)
+    ->execute();
+  if (isset($results['node'])) {
+    $nids = array_keys($results['node']);
+    // Grab the from and to format settings.
+    $from = $form_state['values']['format_from'];
+    $to = $form_state['values']['format_to'];
+    // Convert the text on the nodes.
+    text_format_converter_process_nodes($nids, $from, $to);
+  }
+}
